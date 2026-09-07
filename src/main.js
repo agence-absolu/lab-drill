@@ -214,10 +214,75 @@ function applyPose(id, { focus = false, immediate = false } = {}) {
 
 // Les ancres du header doivent passer par Lenis, sinon le navigateur y saute
 // sans lissage et ScrollTrigger reçoit un saut brut.
-function initAnchors() {
-  const header = document.querySelector('.site-header');
-  const offset = header ? -header.offsetHeight : 0;
+//
+// Un saut vers une section non adjacente traverse au passage toutes les zones
+// de bascule intermédiaires : laissé au scrub, le foret jouerait chaque pose
+// intermédiaire en accéléré. On coupe donc le scrub le temps du trajet et on
+// interpole directement vers la pose visée. À l'arrivée, la timeline qui mène à
+// cette pose a une progression de 1 : la valeur qu'elle réapplique en se
+// réactivant est exactement celle déjà en place, sans à-coup.
+const JUMP_DURATION = 1.1; // s, trajet du défilement
+let scrubGuard = null;
 
+function setScrubEnabled(on) {
+  for (const tl of timelines) {
+    const st = tl.scrollTrigger;
+    if (!st) continue;
+
+    if (!on) {
+      st.disable(false); // sans revert : on garde la pose en cours
+      continue;
+    }
+
+    st.enable();
+    st.update();
+    // Le scrub rattrape sa progression progressivement : à la réactivation, ce
+    // rattrapage rejouerait justement le bout de transition qu'on vient
+    // d'éviter. On le termine d'un coup — la valeur visée est déjà en place.
+    st.getTween()?.progress(1);
+  }
+}
+
+function releaseScrub() {
+  clearTimeout(scrubGuard);
+  scrubGuard = null;
+  setScrubEnabled(true);
+}
+
+function goToSection(target, id) {
+  const offsetEl = document.querySelector('.site-header');
+  const offset = offsetEl ? -offsetEl.offsetHeight : 0;
+
+  if (!lenis) {
+    target.scrollIntoView({ behavior: REDUCED ? 'auto' : 'smooth' });
+    return;
+  }
+
+  const from = ORDER.indexOf(currentId);
+  const to = ORDER.indexOf(id);
+  const adjacent = from < 0 || to < 0 || Math.abs(to - from) <= 1;
+
+  if (adjacent) {
+    lenis.scrollTo(target, { offset });
+    return;
+  }
+
+  clearTimeout(scrubGuard);
+  setScrubEnabled(false);
+  applyPose(id);
+
+  lenis.scrollTo(target, {
+    offset,
+    duration: JUMP_DURATION,
+    onComplete: releaseScrub,
+  });
+
+  // Filet : si le trajet est interrompu (molette pendant l'animation),
+  // onComplete peut ne jamais venir et le scrub resterait désactivé.
+  scrubGuard = setTimeout(releaseScrub, (JUMP_DURATION + 0.5) * 1000);
+}
+
+function initAnchors() {
   for (const link of document.querySelectorAll('a[href^="#"]')) {
     const href = link.getAttribute('href');
     if (href.length < 2) continue;
@@ -227,8 +292,7 @@ function initAnchors() {
 
     link.addEventListener('click', (e) => {
       e.preventDefault();
-      if (lenis) lenis.scrollTo(target, { offset });
-      else target.scrollIntoView({ behavior: REDUCED ? 'auto' : 'smooth' });
+      goToSection(target, target.dataset.pose);
     });
   }
 }
