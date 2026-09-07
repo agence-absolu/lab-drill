@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Diager Drill — scène 3D</title>
+    <style>
+      :root { --bg: #2e2b2f; }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body, #app { width: 100%; height: 100%; overflow: hidden; }
+      body { background: var(--bg); font-family: system-ui, sans-serif; }
+      canvas { display: block; }
+      #loader {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        color: rgba(233, 226, 222, 0.55);
+        font-size: 13px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        pointer-events: none;
+        transition: opacity 0.4s ease;
+      }
+      #loader.hidden { opacity: 0; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="loader">Chargement…</div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
