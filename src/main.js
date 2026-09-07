@@ -3,11 +3,35 @@ import './style.css';
 import * as THREE from 'three';
 import gsap from 'gsap';
 import ScrollTrigger from 'gsap/ScrollTrigger';
+import Lenis from 'lenis';
+import 'lenis/dist/lenis.css';
 
 import { drillRoot, state, modelReady, resetDrag } from './scene.js';
 import { POSES, focusVariant, responsive } from './poses.js';
 
 gsap.registerPlugin(ScrollTrigger);
+
+// --- Défilement lissé ---
+// Lenis interpole la position de scroll ; ScrollTrigger doit donc lire cette
+// position lissée plutôt que celle du navigateur, et Lenis avancer sur le
+// ticker GSAP — deux boucles rAF concurrentes désynchroniseraient le foret du
+// texte d'une frame. lagSmoothing(0) évite que GSAP « rattrape » un gros lag en
+// sautant, ce qui produirait un à-coup dans la transition.
+const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+let lenis = null;
+
+if (!REDUCED) {
+  lenis = new Lenis({
+    lerp: 0.1, // 0 = inerte, 1 = aucun lissage
+    smoothWheel: true,
+    syncTouch: false, // au doigt, on garde le défilement natif
+  });
+
+  lenis.on('scroll', ScrollTrigger.update);
+  gsap.ticker.add((time) => lenis.raf(time * 1000));
+  gsap.ticker.lagSmoothing(0);
+}
 
 const DEG = Math.PI / 180;
 const IDENTITY = new THREE.Quaternion();
@@ -188,6 +212,27 @@ function applyPose(id, { focus = false, immediate = false } = {}) {
   });
 }
 
+// Les ancres du header doivent passer par Lenis, sinon le navigateur y saute
+// sans lissage et ScrollTrigger reçoit un saut brut.
+function initAnchors() {
+  const header = document.querySelector('.site-header');
+  const offset = header ? -header.offsetHeight : 0;
+
+  for (const link of document.querySelectorAll('a[href^="#"]')) {
+    const href = link.getAttribute('href');
+    if (href.length < 2) continue;
+
+    const target = document.querySelector(href);
+    if (!target) continue;
+
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (lenis) lenis.scrollTo(target, { offset });
+      else target.scrollIntoView({ behavior: REDUCED ? 'auto' : 'smooth' });
+    });
+  }
+}
+
 function initButtons() {
   for (const btn of document.querySelectorAll('[data-focus]')) {
     btn.addEventListener('click', () => {
@@ -221,6 +266,7 @@ window.addEventListener('resize', () => {
 document.documentElement.classList.add('js-anim');
 buildTimelines();
 initSectionTriggers();
+initAnchors();
 initButtons();
 
 modelReady.then(() => {
