@@ -3,31 +3,108 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Diager Drill — scène 3D</title>
-    <style>
-      :root { --bg: #2e2b2f; }
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      html, body, #app { width: 100%; height: 100%; overflow: hidden; }
-      body { background: var(--bg); font-family: system-ui, sans-serif; }
-      canvas { display: block; }
-      #loader {
-        position: fixed;
-        inset: 0;
-        display: grid;
-        place-items: center;
-        color: rgba(233, 226, 222, 0.55);
-        font-size: 13px;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        pointer-events: none;
-        transition: opacity 0.4s ease;
-      }
-      #loader.hidden { opacity: 0; }
-    </style>
+    <title>Foret hélicoïdal 01 — Diager</title>
+    <meta
+      name="description"
+      content="Foret hélicoïdal Diager : pointe auto-centrante, goujures à pas large, queue rectifiée. Inspection 3D interactive."
+    />
+    <script type="module" src="/src/main.js"></script>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="canvas-root" aria-hidden="true"></div>
     <div id="loader">Chargement…</div>
-    <script type="module" src="/src/main.js"></script>
+
+    <header class="site-header">
+      <a class="brand" href="#top">
+        <span class="brand-mark">DIAGER</span>
+        <span class="brand-sub">Perçage</span>
+      </a>
+      <nav class="site-nav">
+        <a href="#pointe">La pointe</a>
+        <a href="#goujures">Les goujures</a>
+        <a href="#queue">La queue</a>
+      </nav>
+      <a class="cta" href="#queue">Demander un devis</a>
+    </header>
+
+    <main>
+      <section id="top" class="hero" data-pose="hero">
+        <div class="panel">
+          <p class="kicker">Série 01 · Acier HSS</p>
+          <h1>Le foret que l'on juge au premier millimètre</h1>
+          <p class="lede">
+            Une pointe qui accroche, une hélice qui évacue, une queue qui tient.
+            Faites défiler pour inspecter chaque zone de travail.
+          </p>
+          <p class="hint">Défilez — ou attrapez le foret à la souris</p>
+        </div>
+      </section>
+
+      <section id="pointe" class="content left" data-pose="pointe">
+        <div class="panel">
+          <p class="kicker">01 — La pointe</p>
+          <h2>Une pointe qui mord dès le premier tour</h2>
+          <p>
+            Affûtage croisé et angle de 118° : le foret s'auto-centre au contact,
+            sans pointeau ni dérapage sur les surfaces lisses. L'amorce est
+            franche, même percée à main levée.
+          </p>
+          <button type="button" class="btn" data-focus="pointe">
+            Voir l'affûtage
+          </button>
+        </div>
+      </section>
+
+      <section id="goujures" class="content right" data-pose="goujures">
+        <div class="panel">
+          <p class="kicker">02 — Les goujures</p>
+          <h2>Des goujures qui évacuent au lieu de bourrer</h2>
+          <p>
+            L'hélice à pas large remonte le copeau en continu. Moins
+            d'échauffement, moins de reprises, un perçage qui reste propre du
+            premier au dernier millimètre.
+          </p>
+          <button type="button" class="btn" data-focus="goujures">
+            Suivre l'hélice
+          </button>
+        </div>
+      </section>
+
+      <section id="queue" class="content left" data-pose="queue">
+        <div class="panel">
+          <p class="kicker">03 — La queue</p>
+          <h2>Une queue qui ne patine pas</h2>
+          <p>
+            Queue cylindrique rectifiée, concentrique au corps : le serrage du
+            mandrin est franc et le couple passe intégralement, sans faux-rond ni
+            marquage de l'acier.
+          </p>
+          <button type="button" class="btn" data-focus="queue">
+            Voir la queue
+          </button>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="footer-grid">
+        <div>
+          <p class="brand-mark">DIAGER</p>
+          <p class="muted">Outils de perçage — série 01.</p>
+        </div>
+        <div>
+          <p class="footer-title">Produit</p>
+          <a href="#pointe">La pointe</a>
+          <a href="#goujures">Les goujures</a>
+          <a href="#queue">La queue</a>
+        </div>
+        <div>
+          <p class="footer-title">Ressources</p>
+          <a href="#top">Fiche technique</a>
+          <a href="#top">Tableau des diamètres</a>
+        </div>
+      </div>
+      <p class="legal">© 2026 — Démonstration technique. Contenu non contractuel.</p>
+    </footer>
   </body>
 </html>

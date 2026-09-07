@@ -1,264 +1,236 @@
+import './style.css';
+
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { RectAreaLightUniformsLib } from 'three/addons/lights/RectAreaLightUniformsLib.js';
+import gsap from 'gsap';
+import ScrollTrigger from 'gsap/ScrollTrigger';
 
-import drillUrl from '../models/drill-01.glb?url';
+import { drillRoot, state, modelReady, resetDrag } from './scene.js';
+import { POSES, focusVariant, responsive } from './poses.js';
 
-const container = document.getElementById('app');
-const loaderEl = document.getElementById('loader');
+gsap.registerPlugin(ScrollTrigger);
 
-// --- Renderer ---
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.setClearColor(0x000000, 0);
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.0;
-container.appendChild(renderer.domElement);
+const DEG = Math.PI / 180;
+const IDENTITY = new THREE.Quaternion();
 
-// --- Scène ---
-const scene = new THREE.Scene();
+// Ordre d'apparition des poses dans la page.
+const ORDER = ['hero', 'pointe', 'goujures', 'queue'];
 
-// --- Environnement ---
-// Le métal ne montre que ce qu'il reflète. On part d'un studio clair
-// (RoomEnvironment) dans lequel on plante des panneaux noirs façon « negative
-// fill » : ils n'existent que dans l'environnement réfléchi, jamais dans la
-// scène rendue, donc ils sont invisibles à la caméra mais creusent des bandes
-// sombres dans les reflets, ce qui détache les arêtes et l'hélice du foret.
-const BLACK_PANELS = [
-  { size: [3.5, 7], pos: [0, 0, 3.4] },   // face
-  { size: [3, 7], pos: [-3.6, 0, -1.4] }, // arrière gauche
-  { size: [2.5, 7], pos: [3.4, 0, -2.2] },// arrière droit
-  { size: [2, 6], pos: [1.6, 0.4, 3.0] }, // bande fine, côté caméra
-];
+// Amorti du scrub, en secondes de rattrapage. 0 ou true = rigoureusement collé
+// au scroll ; une petite valeur lisse la molette sans désynchroniser.
+const SCRUB = 0.5;
 
-const SHOW_PANELS = false; // true = matérialise les panneaux pour les régler
+let currentId = 'hero';
+let focused = false;
+let timelines = [];
+let sectionTriggers = [];
 
-const envScene = new RoomEnvironment();
-const panelMaterial = new THREE.MeshBasicMaterial({
-  color: 0x000000,
-  side: THREE.DoubleSide,
-});
+const dragQuat = resetDrag();
 
-for (const p of BLACK_PANELS) {
-  const panel = new THREE.Mesh(new THREE.PlaneGeometry(...p.size), panelMaterial);
-  panel.position.set(...p.pos);
-  panel.lookAt(0, 0, 0);
-  envScene.add(panel);
+function poseFor(id) {
+  return responsive(POSES[id], window.innerWidth);
+}
 
-  if (SHOW_PANELS) {
-    const ghost = panel.clone();
-    ghost.material = new THREE.MeshBasicMaterial({
-      color: 0x000000,
-      transparent: true,
-      opacity: 0.25,
-      side: THREE.DoubleSide,
-    });
-    scene.add(ghost);
+// --- Transitions synchronisées au défilement ---
+// Une timeline par passage d'une pose à la suivante, pilotée en scrub : la
+// progression du foret EST la progression du scroll dans la zone de bascule.
+// Celle-ci est centrée sur la frontière entre deux sections, de sorte qu'une
+// section pleinement à l'écran corresponde toujours à une pose stable.
+function buildTimelines() {
+  for (const tl of timelines) {
+    tl.scrollTrigger?.kill();
+    tl.kill();
   }
-}
+  timelines = [];
 
-const pmrem = new THREE.PMREMGenerator(renderer);
-scene.environment = pmrem.fromScene(envScene, 0.05).texture;
+  for (let i = 0; i < ORDER.length - 1; i++) {
+    const next = document.querySelector(`[data-pose="${ORDER[i + 1]}"]`);
+    if (!next) continue;
 
-// --- Caméra ---
-const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
-camera.position.set(2.2, 1.6, 2.8);
+    const from = poseFor(ORDER[i]);
+    const to = poseFor(ORDER[i + 1]);
+    const first = i === 0;
 
-// --- Interaction ---
-// Ce n'est pas la caméra qui tourne mais le foret : la caméra est totalement
-// figée (ni orbite ni zoom), comme les lumières et les panneaux, donc
-// l'éclairage garde le même caractère quel que soit l'angle du modèle.
-const DRAG_SPEED = 0.006; // rad par pixel
-const DRAG_INERTIA = 0.93; // 0 = arrêt net, 0.97 = glisse longtemps
-
-const dragGroup = new THREE.Group();
-scene.add(dragGroup);
-
-const canvas = renderer.domElement;
-canvas.style.touchAction = 'none';
-canvas.style.cursor = 'grab';
-
-let dragging = false;
-let lastX = 0;
-let lastY = 0;
-let dragAngle = 0; // vitesse résiduelle, entretenue par l'inertie
-const dragAxis = new THREE.Vector3(0, 1, 0);
-const dragQuat = new THREE.Quaternion();
-const viewAxis = new THREE.Vector3();
-
-function applyDrag() {
-  dragQuat.setFromAxisAngle(dragAxis, dragAngle);
-  dragGroup.quaternion.premultiply(dragQuat);
-}
-
-canvas.addEventListener('pointerdown', (e) => {
-  dragging = true;
-  dragAngle = 0;
-  lastX = e.clientX;
-  lastY = e.clientY;
-  canvas.setPointerCapture(e.pointerId);
-  canvas.style.cursor = 'grabbing';
-});
-
-canvas.addEventListener('pointermove', (e) => {
-  if (!dragging) return;
-
-  const dx = e.clientX - lastX;
-  const dy = e.clientY - lastY;
-  lastX = e.clientX;
-  lastY = e.clientY;
-  if (!dx && !dy) return;
-
-  if (e.shiftKey) {
-    // Shift = roll autour de l'axe de vue
-    camera.getWorldDirection(viewAxis);
-    dragAxis.copy(viewAxis);
-    dragAngle = -dx * DRAG_SPEED;
-  } else {
-    // Axe perpendiculaire au geste, exprimé dans le repère de la caméra :
-    // l'objet suit la souris quelle que soit son orientation courante.
-    dragAxis.set(dy, dx, 0).normalize().applyQuaternion(camera.quaternion);
-    dragAngle = Math.hypot(dx, dy) * DRAG_SPEED;
-  }
-
-  applyDrag();
-});
-
-function endDrag() {
-  dragging = false;
-  canvas.style.cursor = 'grab';
-}
-
-canvas.addEventListener('pointerup', endDrag);
-canvas.addEventListener('pointercancel', endDrag);
-
-// --- Lumières ---
-// Éclairage type studio : le métal ne « brille » que s'il a quelque chose à
-// refléter, d'où les RectAreaLight (bandes verticales = reflets allongés sur le
-// cylindre du foret) en plus des lumières directes.
-RectAreaLightUniformsLib.init();
-
-const hemi = new THREE.HemisphereLight(0xdce8ff, 0x35302a, 0.4);
-scene.add(hemi);
-
-const key = new THREE.DirectionalLight(0xffffff, 1.8);
-key.position.set(3, 5, 2.5);
-scene.add(key);
-
-const fill = new THREE.DirectionalLight(0xbfd4ff, 0.7);
-fill.position.set(-4, 2, -3);
-scene.add(fill);
-
-const rim = new THREE.SpotLight(0xfff4e0, 14, 20, Math.PI / 5, 0.6, 1.5);
-rim.position.set(-1.8, 3.5, -3.5);
-scene.add(rim);
-
-// Bandes réfléchies dans le métal
-const stripes = [
-  { color: 0xffffff, intensity: 4.5, w: 0.7, h: 4, pos: [2.4, 0.6, 1.8], look: [0, 0, 0] },
-  { color: 0xd8e6ff, intensity: 3, w: 0.5, h: 4, pos: [-2.6, 0.2, 1.2], look: [0, 0, 0] },
-  { color: 0xfff0d6, intensity: 3.5, w: 0.6, h: 4, pos: [-0.6, 0.8, -2.8], look: [0, 0, 0] },
-];
-
-for (const s of stripes) {
-  const light = new THREE.RectAreaLight(s.color, s.intensity, s.w, s.h);
-  light.position.set(...s.pos);
-  light.lookAt(...s.look);
-  scene.add(light);
-}
-
-// --- Modèle ---
-// Le modèle est un STL converti : on le redresse (axe le plus long vers le haut)
-// puis on le recadre automatiquement.
-const UPRIGHT = true;
-const TARGET_HEIGHT = 1.6;
-const SPIN_SPEED = 0.25; // rad/s
-
-// Acier poli : le .glb ne porte aucune texture, on règle donc le PBR à la main.
-const STEEL = {
-  color: 0x8d9298,
-  metalness: 0.95,
-  roughness: 0.34,
-  envMapIntensity: 1.1,
-};
-
-let drill = null;
-
-new GLTFLoader().load(
-  drillUrl,
-  (gltf) => {
-    const model = gltf.scene;
-
-    model.traverse((o) => {
-      if (!o.isMesh) return;
-      const m = o.material;
-      m.color.setHex(STEEL.color);
-      m.metalness = STEEL.metalness;
-      m.roughness = STEEL.roughness;
-      m.envMapIntensity = STEEL.envMapIntensity;
-      m.needsUpdate = true;
+    const tl = gsap.timeline({
+      scrollTrigger: {
+        trigger: next,
+        start: 'top 85%',
+        end: 'top 35%',
+        scrub: SCRUB,
+        onUpdate: (self) => {
+          // L'écart introduit à la souris se résorbe au fil du défilement.
+          dragQuat.slerp(IDENTITY, 0.12);
+          // La rotation propre ne tourne que sur le hero immobile : ailleurs
+          // elle ferait dériver l'axe que la pose vient de choisir.
+          if (first) state.spin = self.progress === 0;
+        },
+      },
+      // Sans cela, chaque fromTo appliquerait son état de départ à la création
+      // et la dernière timeline créée gagnerait, quelle que soit la position.
+      defaults: { ease: 'none', immediateRender: false },
     });
 
-    if (UPRIGHT) {
-      const raw = new THREE.Box3().setFromObject(model).getSize(new THREE.Vector3());
-      if (raw.x > raw.y && raw.x >= raw.z) model.rotation.z = -Math.PI / 2;
-      else if (raw.z > raw.y) model.rotation.x = Math.PI / 2;
-    }
+    tl.fromTo(
+      drillRoot.position,
+      { x: from.pos[0], y: from.pos[1], z: from.pos[2] },
+      { x: to.pos[0], y: to.pos[1], z: to.pos[2] },
+      0
+    )
+      .fromTo(
+        drillRoot.rotation,
+        { x: from.rot[0] * DEG, y: from.rot[1] * DEG, z: from.rot[2] * DEG },
+        { x: to.rot[0] * DEG, y: to.rot[1] * DEG, z: to.rot[2] * DEG },
+        0
+      )
+      .fromTo(
+        drillRoot.scale,
+        { x: from.scale, y: from.scale, z: from.scale },
+        { x: to.scale, y: to.scale, z: to.scale },
+        0
+      );
 
-    // Recentrer, mettre à l'échelle, poser sur le sol
-    const box = new THREE.Box3().setFromObject(model);
-    const size = box.getSize(new THREE.Vector3());
-    const center = box.getCenter(new THREE.Vector3());
-    const scale = TARGET_HEIGHT / Math.max(size.x, size.y, size.z);
-
-    const pivot = new THREE.Group();
-    model.position.sub(center);
-    pivot.add(model);
-    pivot.scale.setScalar(scale);
-    dragGroup.add(pivot);
-
-    // Cadrage caméra sur la boîte englobante
-    const fitted = new THREE.Box3().setFromObject(pivot);
-    const fSize = fitted.getSize(new THREE.Vector3());
-    const fCenter = fitted.getCenter(new THREE.Vector3());
-    const maxDim = Math.max(fSize.x, fSize.y, fSize.z);
-    const dist = (maxDim / 2 / Math.tan((camera.fov * Math.PI) / 360)) * 1.45;
-
-    camera.position.set(dist * 0.5, dist * 0.45, dist * 0.72);
-    camera.lookAt(fCenter);
-
-    drill = pivot;
-    loaderEl.classList.add('hidden');
-  },
-  undefined,
-  (err) => {
-    console.error(err);
-    loaderEl.textContent = 'Erreur de chargement du modèle';
+    timelines.push(tl);
   }
-);
+}
 
-// --- Resize ---
+// --- Section active ---
+// Sert au repérage (classe CSS, cible du bouton « détail ») ; le placement du
+// foret, lui, est entièrement entre les mains du scrub ci-dessus.
+function initSectionTriggers() {
+  for (const t of sectionTriggers) t.kill();
+  sectionTriggers = [];
+
+  for (const el of document.querySelectorAll('[data-pose]')) {
+    sectionTriggers.push(
+      ScrollTrigger.create({
+        trigger: el,
+        start: 'top center',
+        end: 'bottom center',
+        onToggle: (self) => {
+          if (!self.isActive) return;
+          currentId = el.dataset.pose;
+          focused = false;
+          document.querySelectorAll('[data-pose]').forEach((s) => {
+            s.classList.toggle('is-active', s === el);
+          });
+          document.querySelectorAll('[data-focus]').forEach((b) => {
+            b.classList.remove('is-on');
+          });
+        },
+      })
+    );
+
+    const panel = el.querySelector('.panel');
+    if (!panel) continue;
+
+    // Apparition confiée au CSS : un tween GSAP « from » se fait reverter par
+    // les refresh de ScrollTrigger et reste figé à mi-course.
+    sectionTriggers.push(
+      ScrollTrigger.create({
+        trigger: el,
+        start: 'top 80%',
+        once: true,
+        onEnter: () => panel.classList.add('is-in'),
+      })
+    );
+  }
+}
+
+// --- Pose ponctuelle ---
+// Utilisée hors défilement : mise en place initiale et bouton « détail ».
+// L'interpolation passe par un proxy plutôt que par des tweens visant
+// directement drillRoot : un tween posé sur les mêmes propriétés écraserait
+// (overwrite) les fromTo des timelines scrubées, qui ne rendraient plus rien.
+const poseProxy = { t: 0 };
+
+function writePose(pose) {
+  drillRoot.position.set(...pose.pos);
+  drillRoot.rotation.set(pose.rot[0] * DEG, pose.rot[1] * DEG, pose.rot[2] * DEG);
+  drillRoot.scale.setScalar(pose.scale);
+}
+
+function applyPose(id, { focus = false, immediate = false } = {}) {
+  const base = POSES[id];
+  if (!base) return;
+
+  const pose = responsive(focus ? focusVariant(base) : base, window.innerWidth);
+  state.spin = Boolean(pose.spin);
+
+  if (immediate) {
+    writePose(pose);
+    return;
+  }
+
+  const fromPos = drillRoot.position.clone();
+  const fromRot = drillRoot.rotation.clone();
+  const fromScale = drillRoot.scale.x;
+
+  gsap.killTweensOf(poseProxy);
+  poseProxy.t = 0;
+
+  gsap.to(poseProxy, {
+    t: 1,
+    duration: 0.9,
+    ease: 'power3.out',
+    onUpdate: () => {
+      const t = poseProxy.t;
+      drillRoot.position.set(
+        THREE.MathUtils.lerp(fromPos.x, pose.pos[0], t),
+        THREE.MathUtils.lerp(fromPos.y, pose.pos[1], t),
+        THREE.MathUtils.lerp(fromPos.z, pose.pos[2], t)
+      );
+      drillRoot.rotation.set(
+        THREE.MathUtils.lerp(fromRot.x, pose.rot[0] * DEG, t),
+        THREE.MathUtils.lerp(fromRot.y, pose.rot[1] * DEG, t),
+        THREE.MathUtils.lerp(fromRot.z, pose.rot[2] * DEG, t)
+      );
+      drillRoot.scale.setScalar(THREE.MathUtils.lerp(fromScale, pose.scale, t));
+    },
+  });
+}
+
+function initButtons() {
+  for (const btn of document.querySelectorAll('[data-focus]')) {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.focus;
+      const next = !(focused && currentId === id);
+      focused = next;
+      currentId = id;
+      applyPose(id, { focus: next });
+      btn.classList.toggle('is-on', next);
+
+      document.querySelectorAll('[data-focus]').forEach((other) => {
+        if (other !== btn) other.classList.remove('is-on');
+      });
+    });
+  }
+}
+
+let resizeTimer;
 window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    // Les bornes des fromTo sont figées à la construction : au changement de
+    // format, les poses responsives changent, donc on reconstruit.
+    buildTimelines();
+    ScrollTrigger.refresh();
+  }, 150);
 });
 
-// --- Boucle ---
-const clock = new THREE.Clock();
+// Le texte ne doit pas attendre le .glb : on câble le défilement tout de suite
+// et on ne diffère que la mise en place de la pose initiale.
+document.documentElement.classList.add('js-anim');
+buildTimelines();
+initSectionTriggers();
+initButtons();
 
-renderer.setAnimationLoop(() => {
-  const dt = clock.getDelta();
-
-  if (drill) drill.rotation.y += SPIN_SPEED * dt;
-
-  // Inertie après relâchement du drag
-  if (!dragging && Math.abs(dragAngle) > 1e-5) {
-    dragAngle *= DRAG_INERTIA;
-    applyDrag();
-  }
-
-  renderer.render(scene, camera);
+modelReady.then(() => {
+  if (window.scrollY < 4) applyPose('hero', { immediate: true });
+  ScrollTrigger.refresh();
 });
+
+// Outil de réglage des poses, chargé uniquement à la demande (page#edit)
+if (location.hash === '#edit') {
+  import('./pose-editor.js').then((m) =>
+    m.mount({ drillRoot, applyPose, getState: () => ({ id: currentId, focused }) })
+  );
+}
