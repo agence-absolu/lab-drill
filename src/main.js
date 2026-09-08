@@ -224,6 +224,40 @@ function applyPose(id, { focus = false, immediate = false } = {}) {
 const JUMP_DURATION = 1.1; // s, trajet du défilement
 let scrubGuard = null;
 
+// Écrit la pose correspondant exactement à la position de défilement courante.
+// La transition « gouvernante » est la dernière dont le trigger a progressé :
+// les zones étant disjointes, il n'y en a jamais qu'une entre 0 et 1.
+function syncPoseToScroll() {
+  if (!timelines.length) return;
+
+  let index = 0;
+  let t = 0;
+
+  timelines.forEach((tl, i) => {
+    const p = tl.scrollTrigger?.progress ?? 0;
+    if (p > 0) {
+      index = i;
+      t = p;
+    }
+  });
+
+  const from = poseFor(ORDER[index]);
+  const to = poseFor(ORDER[index + 1]);
+  const mix = (a, b) => THREE.MathUtils.lerp(a, b, t);
+
+  drillRoot.position.set(
+    mix(from.pos[0], to.pos[0]),
+    mix(from.pos[1], to.pos[1]),
+    mix(from.pos[2], to.pos[2])
+  );
+  drillRoot.rotation.set(
+    mix(from.rot[0], to.rot[0]) * DEG,
+    mix(from.rot[1], to.rot[1]) * DEG,
+    mix(from.rot[2], to.rot[2]) * DEG
+  );
+  drillRoot.scale.setScalar(mix(from.scale, to.scale));
+}
+
 function setScrubEnabled(on) {
   for (const tl of timelines) {
     const st = tl.scrollTrigger;
@@ -236,18 +270,47 @@ function setScrubEnabled(on) {
 
     st.enable();
     st.update();
-    // Le scrub rattrape sa progression progressivement : à la réactivation, ce
-    // rattrapage rejouerait justement le bout de transition qu'on vient
-    // d'éviter. On le termine d'un coup — la valeur visée est déjà en place.
     st.getTween()?.progress(1);
+
+    // Le point clé : une timeline désactivée garde sa progression interne.
+    // Réactivée telle quelle, elle repart de cette valeur périmée et met une
+    // demi-seconde de scrub à rejoindre la bonne — c'est le « départ depuis une
+    // position erronée » constaté à chaque section après un retour par ancre.
+    tl.progress(st.progress);
   }
+
+  // Ces calages successifs écrivent chacun dans drillRoot ; le dernier n'est
+  // pas forcément celui qui gouverne la position réelle, d'où la remise au net.
+  if (on) syncPoseToScroll();
 }
 
 function releaseScrub() {
   clearTimeout(scrubGuard);
   scrubGuard = null;
+  // Le tween de pose du saut ne doit pas continuer d'écrire dans drillRoot en
+  // même temps que le scrub : les deux se disputeraient l'objet.
+  gsap.killTweensOf(poseProxy);
   setScrubEnabled(true);
 }
+
+// Reprendre le défilement à la main pendant un saut annule celui-ci. Sans
+// cela, Lenis interrompt son animation sans appeler onComplete : le scrub
+// resterait mort jusqu'au filet, le foret figé pendant que la page défile,
+// puis se recalerait d'un bloc.
+const SCROLL_KEYS = new Set([
+  'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ',
+]);
+
+function cancelJump() {
+  if (!scrubGuard) return; // aucun saut en cours
+  releaseScrub();
+}
+
+window.addEventListener('wheel', cancelJump, { passive: true });
+window.addEventListener('touchstart', cancelJump, { passive: true });
+window.addEventListener('keydown', (e) => {
+  if (SCROLL_KEYS.has(e.key)) cancelJump();
+});
 
 function goToSection(target, id) {
   const offsetEl = document.querySelector('.site-header');
@@ -274,12 +337,12 @@ function goToSection(target, id) {
   lenis.scrollTo(target, {
     offset,
     duration: JUMP_DURATION,
-    onComplete: releaseScrub,
+    onComplete: () => releaseScrub(),
   });
 
   // Filet : si le trajet est interrompu (molette pendant l'animation),
   // onComplete peut ne jamais venir et le scrub resterait désactivé.
-  scrubGuard = setTimeout(releaseScrub, (JUMP_DURATION + 0.5) * 1000);
+  scrubGuard = setTimeout(() => releaseScrub(), (JUMP_DURATION + 0.5) * 1000);
 }
 
 function initAnchors() {
