@@ -6,8 +6,8 @@ import ScrollTrigger from 'gsap/ScrollTrigger';
 import Lenis from 'lenis';
 import 'lenis/dist/lenis.css';
 
-import { drillRoot, state, modelReady, resetDrag } from './scene.js';
-import { POSES, focusVariant, responsive } from './poses.js';
+import { drillRoot, state, modelReady, resetDrag, focusRing } from './scene.js';
+import { POSES, responsive } from './poses.js';
 
 gsap.registerPlugin(ScrollTrigger);
 
@@ -44,7 +44,6 @@ const ORDER = ['hero', 'pointe', 'goujures', 'queue'];
 const SCRUB = 0.5;
 
 let currentId = 'hero';
-let focused = false;
 let timelines = [];
 let sectionTriggers = [];
 
@@ -83,6 +82,7 @@ function buildTimelines() {
         onUpdate: (self) => {
           // L'écart introduit à la souris se résorbe au fil du défilement.
           dragQuat.slerp(IDENTITY, 0.12);
+          ringForTransition(i, self.progress);
           // La rotation propre ne tourne que sur le hero immobile : ailleurs
           // elle ferait dériver l'axe que la pose vient de choisir.
           if (first) state.spin = self.progress === 0;
@@ -132,12 +132,8 @@ function initSectionTriggers() {
         onToggle: (self) => {
           if (!self.isActive) return;
           currentId = el.dataset.pose;
-          focused = false;
           document.querySelectorAll('[data-pose]').forEach((s) => {
             s.classList.toggle('is-active', s === el);
-          });
-          document.querySelectorAll('[data-focus]').forEach((b) => {
-            b.classList.remove('is-on');
           });
         },
       })
@@ -159,7 +155,61 @@ function initSectionTriggers() {
   }
 }
 
-// --- Pose ponctuelle ---
+// --- Réticule de visée ---
+// Le cercle se pose tout seul sur la zone décrite par la section en place, et
+// s'efface dès qu'une transition commence : un viseur n'a de sens qu'une fois
+// la cible immobile.
+let ringId = null;
+let ringTl = null;
+
+function setRing(id) {
+  if (id === ringId) return; // ne pas relancer l'animation à chaque frame
+  ringId = id;
+
+  const focus = id ? POSES[id]?.focus : undefined;
+  if (focus === undefined) hideRing();
+  else showRing(focus);
+}
+
+// Convention aux bornes : à 0 la transition montre la pose de départ, à 1 celle
+// d'arrivée — les deux timelines voisines s'accordent donc sur les frontières.
+function ringForTransition(index, progress) {
+  if (progress <= 0.001) setRing(ORDER[index]);
+  else if (progress >= 0.999) setRing(ORDER[index + 1]);
+  else setRing(null);
+}
+
+function showRing(y) {
+  focusRing.setTarget(y);
+  focusRing.group.visible = true;
+
+  ringTl?.kill();
+  ringTl = gsap
+    .timeline()
+    .fromTo(
+      focusRing.group.scale,
+      { x: 1.5, y: 1.5, z: 1.5 },
+      { x: 1, y: 1, z: 1, duration: 0.45, ease: 'power3.out' },
+      0
+    )
+    .to(focusRing.material, { opacity: 1, duration: 0.25, ease: 'power2.out' }, 0);
+}
+
+function hideRing() {
+  if (!focusRing.group.visible) return;
+
+  ringTl?.kill();
+  ringTl = gsap.timeline({
+    onComplete: () => {
+      focusRing.group.visible = false;
+    },
+  });
+  ringTl
+    .to(focusRing.group.scale, { x: 0.85, y: 0.85, z: 0.85, duration: 0.25, ease: 'power2.in' }, 0)
+    .to(focusRing.material, { opacity: 0, duration: 0.25, ease: 'power2.in' }, 0);
+}
+
+// --- Pose ponctuelle ---// --- Pose ponctuelle ---
 // Utilisée hors défilement : mise en place initiale et bouton « détail ».
 // L'interpolation passe par un proxy plutôt que par des tweens visant
 // directement drillRoot : un tween posé sur les mêmes propriétés écraserait
@@ -172,11 +222,11 @@ function writePose(pose) {
   drillRoot.scale.setScalar(pose.scale);
 }
 
-function applyPose(id, { focus = false, immediate = false } = {}) {
+function applyPose(id, { immediate = false } = {}) {
   const base = POSES[id];
   if (!base) return;
 
-  const pose = responsive(focus ? focusVariant(base) : base, window.innerWidth);
+  const pose = responsive(base, window.innerWidth);
   state.spin = Boolean(pose.spin);
 
   if (immediate) {
@@ -256,6 +306,8 @@ function syncPoseToScroll() {
     mix(from.rot[2], to.rot[2]) * DEG
   );
   drillRoot.scale.setScalar(mix(from.scale, to.scale));
+
+  ringForTransition(index, t);
 }
 
 function setScrubEnabled(on) {
@@ -360,23 +412,6 @@ function initAnchors() {
   }
 }
 
-function initButtons() {
-  for (const btn of document.querySelectorAll('[data-focus]')) {
-    btn.addEventListener('click', () => {
-      const id = btn.dataset.focus;
-      const next = !(focused && currentId === id);
-      focused = next;
-      currentId = id;
-      applyPose(id, { focus: next });
-      btn.classList.toggle('is-on', next);
-
-      document.querySelectorAll('[data-focus]').forEach((other) => {
-        if (other !== btn) other.classList.remove('is-on');
-      });
-    });
-  }
-}
-
 let resizeTimer;
 window.addEventListener('resize', () => {
   clearTimeout(resizeTimer);
@@ -394,7 +429,6 @@ document.documentElement.classList.add('js-anim');
 buildTimelines();
 initSectionTriggers();
 initAnchors();
-initButtons();
 
 modelReady.then(() => {
   if (window.scrollY < 4) applyPose('hero', { immediate: true });
@@ -404,6 +438,6 @@ modelReady.then(() => {
 // Outil de réglage des poses, chargé uniquement à la demande (page#edit)
 if (location.hash === '#edit') {
   import('./pose-editor.js').then((m) =>
-    m.mount({ drillRoot, applyPose, getState: () => ({ id: currentId, focused }) })
+    m.mount({ drillRoot, applyPose, getState: () => ({ id: currentId }) })
   );
 }

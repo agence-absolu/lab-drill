@@ -104,6 +104,117 @@ for (const s of stripes) {
   scene.add(light);
 }
 
+// --- Réticule de visée ---
+// Cercle d'interface posé sur une zone du foret : il vit dans la scène (pas
+// dans le modèle) pour garder une taille constante quelle que soit l'échelle de
+// la pose, et se rend sans test de profondeur pour rester lisible par-dessus
+// l'acier, comme un élément d'UI.
+const RETICLE = {
+  radius: 0.36, // unités de scène
+  thickness: 1.5, // pixels
+  hookGap: 7, // pixels entre le cercle et les crochets
+  spin: 0.18, // rad/s — seuls les crochets rendent la rotation perceptible
+  color: 0xd98b3f,
+};
+
+// Halo : quelques anneaux larges et très transparents en fusion additive,
+// empilés sous le trait. Un vrai bloom demanderait une passe de
+// post-traitement sur toute la scène pour un effet qui ne concerne que ce
+// cercle.
+const HALO_LAYERS = [
+  { width: 5, alpha: 0.1 },
+  { width: 13, alpha: 0.05 },
+  { width: 28, alpha: 0.025 },
+];
+
+const haloMaterials = [];
+
+const reticleMaterial = new THREE.MeshBasicMaterial({
+  color: RETICLE.color,
+  depthTest: false,
+  transparent: true,
+  opacity: 0,
+  side: THREE.DoubleSide,
+});
+
+const reticleGroup = new THREE.Group();
+reticleGroup.visible = false;
+reticleGroup.renderOrder = 999;
+scene.add(reticleGroup);
+
+// Épaisseur donnée en pixels : on la convertit en unités de scène, ce qui
+// suppose de reconstruire la géométrie quand la hauteur du viewport change.
+function unitsPerPixel() {
+  const visibleHeight = 2 * Math.tan((camera.fov * Math.PI) / 360) * CAMERA_Z;
+  return visibleHeight / window.innerHeight;
+}
+
+function buildReticle() {
+  for (const child of [...reticleGroup.children]) {
+    child.geometry.dispose();
+    if (child.material !== reticleMaterial) child.material.dispose();
+    reticleGroup.remove(child);
+  }
+  haloMaterials.length = 0;
+
+  const u = unitsPerPixel();
+  const t = RETICLE.thickness * u;
+  const gap = RETICLE.hookGap * u;
+  const r = RETICLE.radius;
+
+  // Le halo est ajouté en premier : il se rend donc sous le trait net.
+  for (const layer of HALO_LAYERS) {
+    const w = layer.width * u;
+    const material = new THREE.MeshBasicMaterial({
+      color: RETICLE.color,
+      depthTest: false,
+      transparent: true,
+      opacity: 0,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+    });
+    material.userData.alpha = layer.alpha;
+    haloMaterials.push(material);
+
+    reticleGroup.add(
+      new THREE.Mesh(new THREE.RingGeometry(r - w / 2, r + w / 2, 160), material)
+    );
+  }
+
+  // Beaucoup de segments : sur un trait aussi fin, un cercle facetté se voit.
+  reticleGroup.add(
+    new THREE.Mesh(new THREE.RingGeometry(r - t / 2, r + t / 2, 160), reticleMaterial)
+  );
+
+  // Quatre crochets en diagonale : c'est ce qui fait lire le cercle comme un
+  // viseur plutôt que comme un simple contour. L'écart est exprimé en pixels,
+  // indépendamment de l'épaisseur, pour ne pas bouger si le trait s'affine.
+  for (let i = 0; i < 4; i++) {
+    const start = Math.PI / 4 + (i * Math.PI) / 2 - 0.17;
+    reticleGroup.add(
+      new THREE.Mesh(
+        new THREE.RingGeometry(r + gap, r + gap + t, 16, 1, start, 0.34),
+        reticleMaterial
+      )
+    );
+  }
+}
+
+buildReticle();
+
+let reticleY = 0;
+let reticleAngle = 0;
+const reticlePoint = new THREE.Vector3();
+
+export const focusRing = {
+  group: reticleGroup,
+  material: reticleMaterial,
+  // y exprimé dans le repère du foret : -0,8 (bout de la queue) à +0,8 (pointe)
+  setTarget(y) {
+    reticleY = y;
+  },
+};
+
 // --- Hiérarchie du foret ---
 // drillRoot  : la pose (position / rotation / échelle), animée par GSAP
 //   dragGroup : l'écart introduit à la souris, ramené à zéro à chaque pose
@@ -250,6 +361,7 @@ window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  buildReticle(); // l'épaisseur est exprimée en pixels
 });
 
 // --- Boucle ---
@@ -263,6 +375,26 @@ renderer.setAnimationLoop(() => {
   if (!dragging && Math.abs(dragAngle) > 1e-5) {
     dragAngle *= DRAG_INERTIA;
     applyDrag();
+  }
+
+  // Le réticule colle à un point de l'axe du foret : il faut donc les matrices
+  // à jour, que le rendu ne recalculera qu'après.
+  if (reticleGroup.visible) {
+    scene.updateMatrixWorld(true);
+    reticlePoint.set(0, reticleY, 0);
+    spinGroup.localToWorld(reticlePoint);
+    reticleGroup.position.copy(reticlePoint);
+
+    // On repart de l'orientation face caméra, puis on tourne dans le plan de
+    // l'écran : l'angle est absolu, donc recalculé et non cumulé sur la frame.
+    reticleAngle += RETICLE.spin * dt;
+    reticleGroup.quaternion.copy(camera.quaternion);
+    reticleGroup.rotateZ(reticleAngle);
+
+    // Le halo suit le fondu du trait, dont l'opacité est animée à l'extérieur.
+    for (const material of haloMaterials) {
+      material.opacity = reticleMaterial.opacity * material.userData.alpha;
+    }
   }
 
   renderer.render(scene, camera);
