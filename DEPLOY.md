@@ -1,4 +1,4 @@
-# Déploiement — lab.agence-absolu.com/diager-drill/
+# Déploiement — lab.agence-absolu.com/drill/
 
 Le site compilé est **entièrement statique** (HTML, CSS, JS, un `.glb`). Node
 n'intervient qu'à la compilation ; rien ne tourne en permanence pour la démo.
@@ -31,7 +31,7 @@ dossier servi, n'est pas exposé au web. La contrepartie tient en une phrase, à
 transmettre avec le contrat : **le déploiement du hub ne doit jamais toucher à
 `lab-projects/`** (une exclusion s'il passe par `rsync --delete`).
 
-Le `<slug>` est le nom npm du projet (`diager-drill`) : `vite.config.js` en
+Le `<slug>` est le nom npm du projet (`drill`) : `vite.config.js` en
 déduit la base des chemins, le workflow son dossier de destination. Ni l'un ni
 l'autre ne nomme le projet — ils se recopient tels quels dans la démo suivante.
 
@@ -49,10 +49,10 @@ Ce bloc a été vérifié contre un hub Express 5 factice servant cette démo :
 | Requête | Résultat |
 | --- | --- |
 | `/` et `/api/…` | restent au hub |
-| `/diager-drill/` | la page de la démo |
+| `/drill/` | la page de la démo |
 | `…/assets/index-*.js` | 200, compressé (969 Ko → 306 Ko) |
 | `…/assets/drill-01-*.glb` | 200, `model/gltf-binary` (aucun réglage requis) |
-| `/diager-drill/une/route` | repli sur l'`index.html` de la démo |
+| `/drill/une/route` | repli sur l'`index.html` de la démo |
 | `…/assets/absent.js` | 404 — un fichier manquant reste un fichier manquant |
 | `/pas-une-demo/x` | le 404 du hub |
 
@@ -97,7 +97,7 @@ et le calcul de `base` de `vite.config.js`, puis en créant les mêmes secrets.
 ## 4. Développement local
 
 ```bash
-npm run dev       # http://localhost:5173/diager-drill/
+npm run dev       # http://localhost:5173/drill/
 npm run preview   # prévisualise dist/ sur le même sous-chemin
 npm run build     # compile dans dist/
 ```

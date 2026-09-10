@@ -35,7 +35,7 @@ app.use(compression());
 // (model/gltf-binary), tout comme .gltf et .wasm.
 app.use(
   express.static(LAB_DIR, {
-    index: 'index.html', // /diager-drill/ → /diager-drill/index.html
+    index: 'index.html', // /drill/ → /drill/index.html
     dotfiles: 'ignore', // ne jamais exposer un .git ou un .env égaré
     maxAge: '1y', // les fichiers de assets/ portent une empreinte
     setHeaders(res, file) {
