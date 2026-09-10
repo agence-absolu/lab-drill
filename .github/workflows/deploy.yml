@@ -1,0 +1,63 @@
+# Publication de la démo sur le lab, à chaque push sur main.
+#
+# Transport FTPS plutôt que SSH : sur un site Node.js Infomaniak,
+# l'authentification par clé n'est pas disponible, et un mot de passe SSH en
+# clair dans un runner est moins propre qu'un dépôt FTPS chiffré prévu pour ça.
+#
+# Générique : le dossier de destination se déduit du nom npm du projet, ce
+# fichier se recopie donc tel quel dans la démo suivante.
+#
+# Secrets à créer (Settings › Secrets and variables › Actions) :
+#   LAB_FTP_SERVER    hôte FTP Infomaniak
+#   LAB_FTP_USERNAME  compte FTP
+#   LAB_FTP_PASSWORD  mot de passe
+
+name: Déploiement lab
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # publication manuelle depuis l'onglet Actions
+
+concurrency:
+  group: deploy-lab
+  cancel-in-progress: true # un push plus récent rend le précédent caduc
+
+jobs:
+  publier:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Nom du projet
+        id: meta
+        run: echo "slug=$(node -p "require('./package.json').name")" >> "$GITHUB_OUTPUT"
+
+      - run: npm ci
+
+      # vite.config.js déduit déjà la base du nom npm ; on la passe malgré tout
+      # pour que le workflow reste explicite sur ce qu'il produit.
+      - run: BASE_PATH="/${{ steps.meta.outputs.slug }}/" npm run build
+
+      - name: Envoi vers le lab
+        uses: SamKirkland/FTP-Deploy-Action@v4.4.0
+        with:
+          server: ${{ secrets.LAB_FTP_SERVER }}
+          username: ${{ secrets.LAB_FTP_USERNAME }}
+          password: ${{ secrets.LAB_FTP_PASSWORD }}
+          protocol: ftps # explicite, chiffré ; le mot de passe ne circule pas en clair
+          # Le certificat du serveur est vérifié. Si la connexion est refusée
+          # pour cette raison, repasser à `loose` : la session reste chiffrée,
+          # seule l'authentification du serveur n'est plus contrôlée.
+          security: strict
+          local-dir: ./dist/
+          server-dir: lab.agence-absolu.com/${{ steps.meta.outputs.slug }}/
+          # L'action ne transfère que ce qui a changé ; elle garde pour cela un
+          # état sur le serveur. Le fichier commence par un point, donc
+          # `dotfiles: 'ignore'` du hub ne l'expose pas.
+          state-name: .ftp-deploy-state.json
