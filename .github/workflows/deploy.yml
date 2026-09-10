@@ -70,7 +70,10 @@ jobs:
           SSHPASS: ${{ secrets.LAB_SSH_PASSWORD }}
           HOST: ${{ secrets.LAB_SSH_HOST }}
           USER_SSH: ${{ secrets.LAB_SSH_USER }}
-          TARGET: lab.agence-absolu.com/${{ steps.meta.outputs.slug }}
+          # lab-projects/ tient les démos à l'écart du code du hub : celui-ci peut être
+          # redéployé sans les emporter. Le rangement ne se voit pas dans l'URL,
+          # le hub sert lab-projects/<slug>/ sur /<slug>/.
+          TARGET: lab.agence-absolu.com/lab-projects/${{ steps.meta.outputs.slug }}
         run: |
           sshpass -e ssh "$USER_SSH@$HOST" "mkdir -p '$TARGET'"
           # --delete purge les bundles de la version précédente ; les noms étant

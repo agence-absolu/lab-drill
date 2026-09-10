@@ -3,24 +3,33 @@
 Le site compilé est **entièrement statique** (HTML, CSS, JS, un `.glb`). Node
 n'intervient qu'à la compilation ; rien ne tourne en permanence pour la démo.
 
-## L'architecture, telle que constatée
+## L'architecture
 
-`lab.agence-absolu.com` est servi **directement par le hub** : les en-têtes
-portent `x-powered-by: Express`, sans trace d'Apache, et une URL inconnue reçoit
-le 404 JSON du hub. Aucun `.htaccess` n'a donc d'effet, et rien ne peut être
-servi à côté du hub depuis l'espace utilisateur.
+`lab.agence-absolu.com` est un site de type Node.js : Infomaniak y lance
+l'application déclarée à la racine et **ne sert rien d'autre** — pas de fichiers
+statiques à côté, pas de `.htaccess`. Sans application démarrée, toute URL reçoit
+la page de maintenance de l'hébergeur.
 
 Le montage retenu : **le hub sert les démos**, une fois pour toutes. Une démo
-publiée dans le dossier convenu répond sur son chemin sans que le hub soit
-retouché — c'est le point important, puisqu'il y en aura beaucoup.
+publiée dans `lab-projects/` répond sur son chemin sans que le hub soit retouché —
+c'est le point important, puisqu'il y en aura beaucoup.
 
 ## Convention
 
 | Rôle | Chemin |
 | --- | --- |
-| Dossier des démos (`LAB_DIR`) | `~/lab.agence-absolu.com/` |
-| Une démo | `~/lab.agence-absolu.com/<slug>/` |
+| Racine du site, code du hub | `~/lab.agence-absolu.com/` |
+| Dossier des démos | `~/lab.agence-absolu.com/lab-projects/` |
+| Une démo | `~/lab.agence-absolu.com/lab-projects/<slug>/` |
 | URL publique | `https://lab.agence-absolu.com/<slug>/` |
+
+`lab-projects/` ne paraît pas dans les URL : le hub sert `lab-projects/<slug>/` sur `/<slug>/`.
+Ce dossier à part est ce qui rend les deux cycles de vie indépendants — le hub
+peut être redéployé, nettoyé ou reconstruit sans emporter les démos, une seule
+ligne de son `.gitignore` les ignore toutes, et son propre code, resté hors du
+dossier servi, n'est pas exposé au web. La contrepartie tient en une phrase, à
+transmettre avec le contrat : **le déploiement du hub ne doit jamais toucher à
+`lab-projects/`** (une exclusion s'il passe par `rsync --delete`).
 
 Le `<slug>` est le nom npm du projet (`diager-drill`) : `vite.config.js` en
 déduit la base des chemins, le workflow son dossier de destination. Ni l'un ni

@@ -6,6 +6,12 @@
  * soit son nom et quel que soit le moment où elle est déposée.
  *
  * Rien ici n'est spécifique à une démo : ce bloc se pose une fois pour toutes.
+ *
+ * LAB_DIR est un dossier À PART, jamais la racine du hub : les démos y sont
+ * déposées par un autre canal que son déploiement. Le hub peut ainsi être
+ * redéployé, nettoyé ou reconstruit sans les emporter, une seule ligne de
+ * .gitignore suffit à les ignorer, et son propre code reste hors du dossier
+ * servi — donc hors de portée du web.
  */
 
 import path from 'node:path';
@@ -13,7 +19,7 @@ import compression from 'compression';
 import express from 'express';
 
 // Dossier où les démos sont publiées, hors du code du hub.
-const LAB_DIR = process.env.LAB_DIR || '/home/<clients>/lab.agence-absolu.com';
+const LAB_DIR = process.env.LAB_DIR || path.join(import.meta.dirname, 'lab-projects');
 
 // ─── 1. Compression ──────────────────────────────────────────────────────────
 // Express ne compresse rien par défaut. Une démo 3D pèse ~1 Mo de JavaScript,
