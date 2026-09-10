@@ -49,29 +49,35 @@ Ce bloc a été vérifié contre un hub Express 5 factice servant cette démo :
 
 ## 2. Publier
 
-`.github/workflows/deploy.yml` compile et envoie la démo par **FTPS** à chaque
-push sur `main` — ou à la demande, depuis l'onglet Actions.
+`.github/workflows/deploy.yml` compile et envoie la démo par **rsync sur SSH** à
+chaque push sur `main` — ou à la demande, depuis l'onglet Actions.
 
-Trois secrets à créer dans le dépôt (Settings › Secrets and variables › Actions),
-avec les identifiants FTP lus dans le Manager Infomaniak :
+Secrets à créer dans le dépôt (Settings › Secrets and variables › Actions) :
 
 | Secret | Contenu |
 | --- | --- |
-| `LAB_FTP_SERVER` | hôte FTP |
-| `LAB_FTP_USERNAME` | compte FTP |
-| `LAB_FTP_PASSWORD` | mot de passe |
+| `LAB_SSH_HOST` | hôte SSH, `…ssh.hosting-ik.com` |
+| `LAB_SSH_USER` | compte SSH |
+| `LAB_SSH_PASSWORD` | mot de passe |
+| `LAB_SSH_KNOWN_HOSTS` | facultatif — sortie de `ssh-keyscan <hôte>` |
 
-Un point à vérifier au premier essai : `server-dir` vaut
-`lab.agence-absolu.com/<slug>/`, ce qui suppose que le compte FTP arrive dans le
-home. S'il est cantonné au dossier du site, il faut le réduire à `<slug>/`. Le
-journal de l'action affiche le dossier atteint, l'ajustement est immédiat. Si la
-connexion est refusée pour cause de certificat, `security: loose` débloque.
+Sans le dernier, le workflow relève l'empreinte du serveur au premier contact et
+la croit sur parole. Le renseigner épingle le serveur une fois pour toutes.
 
-Le transport n'est pas SSH parce qu'il ne peut pas l'être : sur un site Node.js
-Infomaniak, l'authentification par clé privée n'est pas disponible
-([documentation](https://www.infomaniak.com/en/support/faq/2054/connect-with-ssh-key)),
-et rien n'est plus fragile qu'un mot de passe SSH rejoué par un runner. FTPS est
-chiffré, prévu pour ce cas, et l'action ne transfère que ce qui a changé.
+### Pourquoi ni clé SSH, ni FTPS
+
+Les deux voies plus propres sont fermées côté Infomaniak, l'une et l'autre
+vérifiées plutôt que supposées :
+
+- **clé privée** : indisponible sur un site Node.js
+  ([documentation](https://www.infomaniak.com/en/support/faq/2054/connect-with-ssh-key)) ;
+- **FTPS** : le port 21 ne répond pas depuis l'extérieur — connexion en timeout,
+  d'où l'`AggregateError: (control socket)` du premier essai.
+
+Le port 22, lui, est joignable depuis n'importe quelle machine, donc depuis un
+runner GitHub. Reste un mot de passe en secret, ce qui n'est pas idéal : le jour
+où Infomaniak ouvrira l'authentification par clé, il suffira de remplacer
+`sshpass -e` par une clé déployée.
 
 ## 3. Ajouter une démo
 
